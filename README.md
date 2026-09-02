@@ -1,165 +1,96 @@
-# typefaster-api
+# TypeFaster API
 
-API serverless do jogo **TypeFaster** (o jogo de digitação multiplayer em `sala.tsx` / `digitacao.tsx`).
+> Backend serverless do **TypeFaster**, um jogo multiplayer de digitação em tempo real.
 
-Arquitetura:
+Esta API cria salas, controla o início das partidas, registra pontuações e fornece uma fonte confiável para o estado do jogo. Ela foi planejada para trabalhar com o aplicativo mobile feito em **Expo / React Native**.
 
-```
-Expo (app)  →  HTTP  →  API na Vercel (este projeto)  →  Neon Postgres
-                              │
-                              └────────────→  Ably (tempo real)
-```
+## Visão geral
 
-- **Neon**: guarda salas, jogadores e placares.
-- **Esta API**: regras do jogo (criar sala, entrar, iniciar, salvar progresso). É quem fala com o Neon — o app nunca acessa o banco direto.
-- **Ably**: avisa os dois celulares em tempo real quando algo muda na sala.
+O jogo possui dois jogadores em uma sala. Ambos recebem a mesma palavra e o mesmo horário de início; à medida que concluem palavras, o placar é sincronizado em tempo real.
 
----
-
-## 1. Configurar o banco (Neon)
-
-1. Abra o editor SQL do seu projeto no Neon.
-2. Rode o script `sql/schema.sql` deste repositório. Ele cria as tabelas `rooms` e `room_players`.
-3. Copie a *connection string* do Neon (algo como `postgresql://usuario:senha@host.neon.tech/dbname?sslmode=require`).
-
-## 2. Instalar dependências
-
-```bash
-npm install
+```text
+  ┌──────────────────────┐        HTTPS         ┌─────────────────────┐
+  │ App Expo | React     │ ──────────────────▶ │ API serverless       │
+  │ Native — jogador A/B │                      │ Vercel              │
+  └──────────┬───────────┘                      └──────────┬──────────┘
+             │                                             │
+             │ atualizações em tempo real                  │ consultas SQL
+             ▼                                             ▼
+┌──────────────────────┐                      ┌──────────────────────┐
+│ Ably                 │                      │ Neon                 │
+│ canais por sala      │                      │ PostgreSQL           │
+└──────────────────────┘                      └──────────────────────┘
 ```
 
-## 3. Configurar variáveis de ambiente
+| Serviço | Responsabilidade |
+| --- | --- |
+| **Expo / React Native** | Interface do jogo e interação do jogador. |
+| **Vercel** | Executa a API sem servidor próprio. |
+| **Neon** | Guarda salas, participantes, partidas e placares. |
+| **Ably** | Envia eventos instantâneos para os dois celulares. |
 
-Copie `.env.example` para `.env` e preencha:
+## Por que existe uma API?
 
-```
-DATABASE_URL=postgresql://...      # connection string do Neon
-ABLY_API_KEY=xxxxx.yyyyy:zzzzz     # chave da sua app no Ably (Root key)
-```
+O aplicativo mobile não deve acessar o Neon usando a senha do banco de dados. A API fica entre o app e o banco para:
 
-Nunca coloque esses valores no app Expo — eles ficam só aqui, no backend.
+- manter segredos em segurança;
+- validar quem pode entrar em cada sala;
+- definir a palavra e o horário oficial da partida;
+- registrar o resultado final;
+- emitir tokens temporários para o canal de tempo real.
 
-## 4. Rodar localmente
+## Fluxo de uma partida
 
-```bash
-npx vercel dev
-```
-
-Isso sobe a API em `http://localhost:3000`. Teste com:
-
-```bash
-curl http://localhost:3000/api/health
-```
-
-## 5. Subir para o GitHub e conectar na Vercel
-
-1. Crie um repositório **privado** no GitHub (ex: `typefaster-api`) e faça o push deste projeto.
-2. Na Vercel: **Add New → Project** e importe o repositório.
-3. Em **Settings → Environment Variables**, cadastre `DATABASE_URL` e `ABLY_API_KEY`.
-4. Faça o deploy. A Vercel vai gerar uma URL como `https://typefaster-api.vercel.app`.
-
-A cada push na branch principal, a API é publicada automaticamente.
-
----
-
-## Rotas disponíveis
-
-| Método | Rota | Função | Body |
-|---|---|---|---|
-| GET | `/api/health` | Testa se a API está no ar | — |
-| POST | `/api/rooms` | Cria uma sala, devolve o código | `{ playerId, playerName }` |
-| GET | `/api/rooms/:code` | Estado atual da sala e jogadores | — |
-| POST | `/api/rooms/:code/join` | Segundo jogador entra na sala | `{ playerId, playerName }` |
-| POST | `/api/rooms/:code/start` | Sorteia a palavra e inicia a partida | — |
-| POST | `/api/rooms/:code/progress` | Salva pontuação/palavras concluídas | `{ playerId, score, wordsCompleted }` |
-| POST | `/api/rooms/:code/finish` | Fecha a partida e define o vencedor | — |
-| POST | `/api/ably-token` | Gera token temporário do Ably para o app | `{ playerId, code? }` |
-
-`playerId` deve ser um UUID (as colunas no Postgres são `UUID`). No app, gere um
-UUID por celular na primeira abertura e salve com `AsyncStorage` — por exemplo
-usando `expo-crypto`:
-
-```ts
-import * as Crypto from 'expo-crypto';
-const playerId = Crypto.randomUUID();
+```text
+1. Jogador A cria uma sala
+2. API gera um código, por exemplo: A7K2XP
+3. Jogador B informa o código e entra na mesma sala
+4. Ably avisa os dois jogadores que a sala está completa
+5. O anfitrião inicia a partida
+6. API escolhe a palavra e registra started_at
+7. Cada jogador informa seu progresso
+8. Ably sincroniza o placar entre os celulares
+9. API encerra a partida e salva o vencedor no Neon
 ```
 
-### Exemplo: criar sala
+## Endpoints planejados
 
-```bash
-curl -X POST https://typefaster-api.vercel.app/api/rooms \
-  -H "Content-Type: application/json" \
-  -d '{ "playerId": "11111111-1111-1111-1111-111111111111", "playerName": "JOAO" }'
-```
+| Método | Rota | Descrição |
+| --- | --- | --- |
+| `POST` | `/api/rooms` | Cria uma sala e cadastra o anfitrião. |
+| `GET` | `/api/rooms/:code` | Obtém o estado atual de uma sala. |
+| `POST` | `/api/rooms/:code/join` | Adiciona o segundo jogador. |
+| `POST` | `/api/rooms/:code/start` | Inicia a partida com a palavra e o horário oficiais. |
+| `POST` | `/api/rooms/:code/progress` | Atualiza placar e palavras concluídas de um jogador. |
+| `POST` | `/api/rooms/:code/finish` | Finaliza a partida e registra o vencedor. |
+| `POST` | `/api/ably-token` | Fornece um token temporário para o canal da sala. |
 
-Resposta:
+### Exemplo — criar uma sala
 
-```json
-{ "sala": { "id": "...", "code": "A7K2XP", "status": "waiting", "created_at": "..." } }
-```
+**Requisição**
 
----
+```http
+POST /api/rooms
+Content-Type: application/json
 
-## Integrando com o app Expo
-
-No app, crie um `lib/api.ts` apontando para a URL da Vercel:
-
-```ts
-const API_URL = 'https://typefaster-api.vercel.app';
-
-export async function criarSala(playerId: string, playerName: string) {
-  const res = await fetch(`${API_URL}/api/rooms`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ playerId, playerName }),
-  });
-  return res.json();
+{
+  "playerId": "f83fc3f0-54f3-4209-bebd-8bc5d5b94517",
+  "name": "João"
 }
 ```
 
-Para tempo real, use o token gerado por `/api/ably-token` para autenticar o
-cliente Ably no app (`ably` tem SDK oficial para React Native/Expo) e inscreva-se
-no canal `room:CODIGO` para receber os eventos:
+**Resposta**
 
-- `jogador-entrou`
-- `partida-iniciada`
-- `progresso-atualizado`
-- `partida-finalizada`
-
-### Próximos passos sugeridos no app
-
-1. Em `sala.tsx`: trocar os dados fake por chamadas reais a `criarSala` /
-   `entrarSala`, e navegar para `digitacao.tsx` só depois que o segundo
-   jogador entrar (evento `jogador-entrou`).
-2. Em `digitacao.tsx`: usar a `word` e o `started_at` que vêm da API (rota
-   `start`) em vez de sortear a palavra localmente, e substituir o placar
-   simulado do oponente pelos eventos `progresso-atualizado` do Ably.
-
----
-
-## Estrutura do projeto
-
+```json
+{
+  "roomId": "3d5a7c89-bef4-4aa3-9e50-04e43d647ef2",
+  "code": "A7K2XP",
+  "status": "waiting"
+}
 ```
-typefaster-api/
-├── api/
-│   ├── health.ts
-│   ├── ably-token.ts
-│   └── rooms/
-│       ├── index.ts            (POST cria sala)
-│       └── [code]/
-│           ├── index.ts        (GET estado da sala)
-│           ├── join.ts         (POST entrar)
-│           ├── start.ts        (POST iniciar partida)
-│           ├── progress.ts     (POST salvar progresso)
-│           └── finish.ts       (POST finalizar partida)
-├── lib/
-│   ├── db.ts                   (cliente Neon)
-│   ├── ably.ts                 (cliente Ably)
-│   └── http.ts                 (CORS)
-├── sql/
-│   └── schema.sql
-├── package.json
-├── tsconfig.json
-├── .env.example
-└── .gitignore
-```
+
+## Modelo de dados inicial
+
+Execute este SQL no editor do Neon para criar a primeira versão do banco:
+
+```sql
