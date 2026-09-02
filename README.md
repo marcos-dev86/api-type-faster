@@ -88,9 +88,3 @@ Content-Type: application/json
   "status": "waiting"
 }
 ```
-
-## Modelo de dados inicial
-
-Execute este SQL no editor do Neon para criar a primeira versão do banco:
-
-```sql
