@@ -20,6 +20,8 @@ CREATE TABLE IF NOT EXISTS room_players (
   name VARCHAR(30) NOT NULL,
   score INTEGER NOT NULL DEFAULT 0,
   words_completed INTEGER NOT NULL DEFAULT 0,
+  current_word VARCHAR(10),        -- palavra que este jogador está digitando agora
+  used_words TEXT[] NOT NULL DEFAULT '{}', -- palavras que ESTE jogador já recebeu nesta partida
   PRIMARY KEY (room_id, player_id)
 );
 

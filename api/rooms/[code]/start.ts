@@ -2,22 +2,14 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { sql } from '../../../lib/db';
 import { handleOptions } from '../../../lib/http';
 import { publicarNaSala } from '../../../lib/ably';
-
-const PALAVRAS = [
-  'CARRO', 'LIVRO', 'PRATO', 'VERDE', 'PRETO', 'BANCO', 'CAMPO', 'FESTA',
-  'TERRA', 'PORTA', 'FRUTA', 'NOITE', 'PONTE', 'VIDRO', 'TIGRE', 'DENTE',
-  'FALAR', 'GRAVE', 'NUVEM', 'LOBOS',
-];
-
-function palavraAleatoria(): string {
-  return PALAVRAS[Math.floor(Math.random() * PALAVRAS.length)];
-}
+import { sortearPalavra } from '../../../lib/palavras';
 
 /**
  * POST /api/rooms/:code/start
- * Escolhe a palavra e marca o horário oficial de início.
- * Como o started_at vem do servidor, os dois celulares começam
- * exatamente na mesma partida, no mesmo instante.
+ * Marca o horário oficial de início (started_at vem do servidor, então os
+ * dois celulares usam o MESMO relógio para o cronômetro). A palavra, porém,
+ * é sorteada de forma independente para cada jogador — os dois não
+ * precisam receber a mesma palavra.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (handleOptions(req, res)) return;
@@ -49,15 +41,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    const palavra = palavraAleatoria();
+    // Cada jogador começa sem palavras usadas ainda, então o primeiro
+    // sorteio de cada um é livre dentro do banco inteiro.
+    const palavraHost = sortearPalavra([]);
+    const palavraGuest = sortearPalavra([]);
 
     const [salaAtualizada] = await sql`
       UPDATE rooms
-      SET status = 'playing', word = ${palavra}, started_at = NOW()
+      SET status = 'playing', started_at = NOW()
       WHERE id = ${sala.id}
-      RETURNING id, code, status, word, started_at
+      RETURNING id, code, status, started_at
     `;
 
+    await sql`
+      UPDATE room_players
+      SET score = 0, words_completed = 0, current_word = ${palavraHost}, used_words = ARRAY[${palavraHost}]::text[]
+      WHERE room_id = ${sala.id} AND player_id = ${sala.host_id}
+    `;
+
+    await sql`
+      UPDATE room_players
+      SET score = 0, words_completed = 0, current_word = ${palavraGuest}, used_words = ARRAY[${palavraGuest}]::text[]
+      WHERE room_id = ${sala.id} AND player_id = ${sala.guest_id}
+    `;
+
+    // Não publicamos a palavra de ninguém aqui — cada celular busca a sua
+    // própria palavra em GET /api/rooms/:code/word.
     await publicarNaSala(codigo, 'partida-iniciada', salaAtualizada);
 
     res.status(200).json({ sala: salaAtualizada });

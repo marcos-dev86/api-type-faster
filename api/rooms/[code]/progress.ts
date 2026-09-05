@@ -2,11 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { sql } from '../../../lib/db';
 import { handleOptions } from '../../../lib/http';
 import { publicarNaSala } from '../../../lib/ably';
+import { sortearPalavra } from '../../../lib/palavras';
 
 /**
  * POST /api/rooms/:code/progress
- * Salva a pontuação e palavras concluídas de um jogador,
- * e publica a atualização para o outro celular ver na hora.
+ * Salva a pontuação de um jogador e já devolve a próxima palavra DELE,
+ * sorteada sem repetir nenhuma palavra que ele já recebeu nesta partida.
  * Body: { playerId: string (uuid), score: number, wordsCompleted: number }
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -35,9 +36,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sala = salas[0];
 
+    const linhas = await sql`
+      SELECT used_words
+      FROM room_players
+      WHERE room_id = ${sala.id} AND player_id = ${playerId}
+    `;
+
+    if (linhas.length === 0) {
+      res.status(404).json({ erro: 'Jogador não encontrado nesta sala' });
+      return;
+    }
+
+    const usadasPeloJogador: string[] = linhas[0].used_words ?? [];
+    const novaPalavra = sortearPalavra(usadasPeloJogador);
+
     await sql`
       UPDATE room_players
-      SET score = ${score}, words_completed = ${wordsCompleted}
+      SET score = ${score},
+          words_completed = ${wordsCompleted},
+          current_word = ${novaPalavra},
+          used_words = array_append(used_words, ${novaPalavra})
       WHERE room_id = ${sala.id} AND player_id = ${playerId}
     `;
 
@@ -47,9 +65,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       WHERE room_id = ${sala.id}
     `;
 
+    // Publica só o placar — a palavra sorteada continua sendo só do jogador.
     await publicarNaSala(codigo, 'progresso-atualizado', { playerId, score, wordsCompleted });
 
-    res.status(200).json({ jogadores });
+    res.status(200).json({ jogadores, novaPalavra });
   } catch (erro) {
     console.error(erro);
     res.status(500).json({ erro: 'Erro ao salvar progresso' });
