@@ -98,3 +98,7 @@ CREATE TABLE IF NOT EXISTS matches (
 CREATE INDEX IF NOT EXISTS idx_matches_host ON matches (host_id);
 CREATE INDEX IF NOT EXISTS idx_matches_guest ON matches (guest_id);
 CREATE INDEX IF NOT EXISTS idx_matches_room ON matches (room_id);
+
+ALTER TABLE room_players
+  ADD COLUMN IF NOT EXISTS current_word VARCHAR(10),
+  ADD COLUMN IF NOT EXISTS used_words TEXT[] NOT NULL DEFAULT '{}';
