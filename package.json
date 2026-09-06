@@ -1,0 +1,21 @@
+{
+  "name": "typefaster-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "API serverless do jogo TypeFaster (Neon + Ably), feita para deploy na Vercel.",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "dev": "vercel dev"
+  },
+  "dependencies": {
+    "@neondatabase/serverless": "^0.9.5",
+    "ably": "^2.3.1"
+  },
+  "devDependencies": {
+    "@vercel/node": "^3.2.1",
+    "typescript": "^5.4.5",
+    "vercel": "^34.2.0"
+  }
+}
