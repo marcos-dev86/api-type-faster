@@ -7,9 +7,14 @@
  * Dica: mantenha tudo em MAIÚSCULAS, sem acento e sem espaço.
  */
 const PALAVRAS_BASE = [
-  'CARRO', 'LIVRO', 'PRATO', 'AMIGO', 'SEVEN', 'VERDE', 'PRETO', 'BANCO', 'CAMPO', 'FESTA',
+  'CARRO', 'LIVRO', 'PRATO', 'AMIGO', 'SEVEN', 'VERDE', 'PRETO', 'BANCO', 
   'TERRA', 'PORTA', 'FRUTA', 'NOITE', 'PONTE', 'VIDRO', 'TIGRE', 'DENTE',
-  'FALAR', 'GRAVE', 'NUVEM', 'LOBOS', 'NEGRO', 'AURAX',
+  'FALAR', 'GRAVE', 'NUVEM', 'LOBOS', 'NEGRO', 'AURAX',   'COISA', 'FOLHA', 'CAMPO',
+  'HOMEM','JANTA', 'LUGAR', 'MAIOR', 'MANGA', 'MARCA', 'MENOR', 'GENTE', 'FESTA',
+  'MESA', 'MUNDO', 'MURAL', 'NARIZ', 'NAVIO', 'PAPEL', 'PEDRA', 'PEIXE', 'PERNA', 'PILHA',
+  'PODAR', 'PRAIA', 'RADIO', 'ROUPA', 'SABAO', 'SALAO', 'SENHA', 'SONHO', 'TEMPO', 'TEXTO',
+  'TOCAR', 'TRIGO', 'VELHO', 'VERAO', 'BOLSA', 'CALCA', 'CHAVE', 'CORPO', 'CARNE', 'CINCO',
+  'DIZER', 'FAZER', 'MORAR', 'PEGAR', 'ANDAR', 'BEBER', 'COMER', 'OLHAR', 'OUVIR', 'VIVER'
 
   // 👇 Adicione o restante das suas palavras de 5 letras aqui embaixo.
 ];
