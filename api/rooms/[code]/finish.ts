@@ -4,6 +4,34 @@ import { handleOptions } from '../../../lib/http';
 import { publicarNaSala } from '../../../lib/ably';
 import { calcularXpGanho, type ResultadoPartida } from '../../../lib/nivel';
 
+const TENTATIVAS_ESPERA = 6;
+const INTERVALO_ESPERA_MS = 250;
+
+function esperar(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function montarRespostaDaPartidaSalva(partida: any) {
+  const host = {
+    player_id: partida.host_id,
+    name: partida.host_name,
+    score: partida.host_score,
+    xpGanho: partida.host_xp_ganho,
+  };
+  const guest = {
+    player_id: partida.guest_id,
+    name: partida.guest_name,
+    score: partida.guest_score,
+    xpGanho: partida.guest_xp_ganho,
+  };
+
+  return {
+    jogadores: [host, guest],
+    vencedor: partida.winner_id ? (partida.winner_id === partida.host_id ? host : guest) : null,
+    empate: !partida.winner_id,
+  };
+}
+
 /**
  * POST /api/rooms/:code/finish
  * Fecha a partida, calcula o vencedor com base no placar salvo no banco,
@@ -11,8 +39,11 @@ import { calcularXpGanho, type ResultadoPartida } from '../../../lib/nivel';
  *
  * É seguro chamar essa rota mais de uma vez para a mesma sala (os dois
  * celulares costumam chamar quase ao mesmo tempo, quando o cronômetro
- * zera nos dois): da segunda vez em diante, ela só devolve o resultado
- * que já tinha sido salvo, em vez de gerar XP ou histórico duplicado.
+ * zera nos dois). A segurança vem do UPDATE condicional logo abaixo: só
+ * uma das duas chamadas consegue trocar o status para 'finished' (ele
+ * funciona como uma trava atômica no próprio banco). A que perder a
+ * corrida não recalcula nada — ela espera a vencedora salvar e só lê o
+ * resultado, evitando XP e histórico duplicados.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (handleOptions(req, res)) return;
@@ -34,29 +65,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const sala = salas[0];
 
-    // Sala já finalizada antes (provavelmente pelo outro celular): devolve
-    // o resultado que já existe, sem recalcular XP nem duplicar histórico.
-    if (sala.status === 'finished') {
-      const partidasSalvas = await sql`
-        SELECT * FROM matches WHERE room_id = ${sala.id} ORDER BY finished_at DESC LIMIT 1
-      `;
+    // Tenta reservar o direito de finalizar: só quem conseguir trocar o
+    // status (rowCount > 0) segue para calcular e gravar. Isso é atômico
+    // no Postgres — não existe janela onde as duas chamadas passem juntas.
+    const reserva = await sql`
+      UPDATE rooms SET status = 'finished'
+      WHERE id = ${sala.id} AND status != 'finished'
+      RETURNING id
+    `;
 
-      if (partidasSalvas.length > 0) {
-        const partida = partidasSalvas[0];
-        res.status(200).json({
-          jogadores: [
-            { player_id: partida.host_id, name: partida.host_name, score: partida.host_score },
-            { player_id: partida.guest_id, name: partida.guest_name, score: partida.guest_score },
-          ],
-          vencedor: partida.winner_id
-            ? partida.winner_id === partida.host_id
-              ? { player_id: partida.host_id, name: partida.host_name, score: partida.host_score }
-              : { player_id: partida.guest_id, name: partida.guest_name, score: partida.guest_score }
-            : null,
-          empate: !partida.winner_id,
-        });
-        return;
+    if (reserva.length === 0) {
+      // Perdeu a corrida (ou a sala já tinha sido finalizada antes): não
+      // recalcula nada, só espera a partida aparecer em `matches`.
+      for (let tentativa = 0; tentativa < TENTATIVAS_ESPERA; tentativa++) {
+        const partidas = await sql`
+          SELECT * FROM matches WHERE room_id = ${sala.id} ORDER BY finished_at DESC LIMIT 1
+        `;
+        if (partidas.length > 0) {
+          res.status(200).json(montarRespostaDaPartidaSalva(partidas[0]));
+          return;
+        }
+        await esperar(INTERVALO_ESPERA_MS);
       }
+
+      // Só cai aqui num cenário bem raro (a outra chamada travou no meio).
+      res.status(202).json({ erro: 'Partida sendo finalizada, tente novamente em instantes' });
+      return;
     }
 
     const jogadores = await sql`
@@ -95,8 +129,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const xpHost = calcularXpGanho(resultadoHost, host.words_completed);
     const xpGuest = calcularXpGanho(resultadoGuest, guest.words_completed);
 
+    // O status já virou 'finished' na reserva acima — aqui só falta o vencedor.
     await sql`
-      UPDATE rooms SET status = 'finished', winner_id = ${vencedorId} WHERE id = ${sala.id}
+      UPDATE rooms SET winner_id = ${vencedorId} WHERE id = ${sala.id}
     `;
 
     // Cria (ou atualiza) o perfil de cada jogador com o resultado desta partida.
