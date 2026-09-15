@@ -15,7 +15,7 @@ Expo (app)  →  HTTP  →  API na Vercel (este projeto)  →  Neon Postgres
 - **Ably**: avisa os dois celulares em tempo real quando algo muda na sala.
 
 ---
-
+ 
 ## 1. Configurar o banco (Neon)
 
 1. Abra o editor SQL do seu projeto no Neon.
