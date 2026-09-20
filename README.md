@@ -181,3 +181,7 @@ typefaster-api/
 ├── .env.example
 └── .gitignore
 ```
+
+## Repositório e desenvolvedor
+
+Desenvolvido por [Marcos Rosa](https://github.com/marcos-dev86) e grupo da ETEC
